@@ -231,6 +231,18 @@ h1 {
   filter: drop-shadow(0 12px 24px rgba(0, 0, 0, 0.5));
 }
 
+.logo-fallback {
+  display: grid;
+  width: 100%;
+  min-height: 56px;
+  place-items: center;
+  color: #ffffff;
+  font-size: 14px;
+  font-weight: 900;
+  line-height: 1.2;
+  text-align: center;
+}
+
 .top-card-title {
   margin: 0;
   font-size: 20px;
@@ -385,6 +397,24 @@ h1 {
   color: #ffffff;
   text-decoration-color: rgba(255, 255, 255, 0.42);
   text-underline-offset: 3px;
+}
+
+.empty-state {
+  display: grid;
+  gap: 8px;
+  min-height: 180px;
+  align-content: center;
+  justify-items: center;
+  border: 1px solid #303030;
+  border-radius: 8px;
+  background: rgba(21, 21, 21, 0.92);
+  color: var(--muted);
+  text-align: center;
+}
+
+.empty-state strong {
+  color: #ffffff;
+  font-size: 22px;
 }
 
 @media (max-width: 980px) {
