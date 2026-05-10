@@ -1,0 +1,32 @@
+name: Publish Netflix Weekly Top 10
+
+on:
+  schedule:
+    # Every Friday at 19:00 in Asia/Shanghai, expressed in UTC.
+    - cron: "0 11 * * 5"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  publish-telegram:
+    runs-on: ubuntu-latest
+    env:
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      TELEGRAM_CHANNEL: ${{ secrets.TELEGRAM_CHANNEL }}
+      PUBLIC_PAGE_URL: ${{ vars.PUBLIC_PAGE_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install dependencies
+        run: npm install
+      - name: Install browser
+        run: PLAYWRIGHT_BROWSERS_PATH=.ms-playwright npx playwright install --with-deps chromium
+      - name: Capture ranking images
+        run: npm run capture:all
+      - name: Publish to Telegram
+        run: npm run publish:telegram

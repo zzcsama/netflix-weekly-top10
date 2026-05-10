@@ -1,0 +1,19 @@
+{
+  "name": "netflix-weekly-top10",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "capture:global": "PLAYWRIGHT_BROWSERS_PATH=.ms-playwright node scripts/capture-page.js --chart global --output outputs/netflix-top10-global.png",
+    "capture:us": "PLAYWRIGHT_BROWSERS_PATH=.ms-playwright node scripts/capture-page.js --chart us --output outputs/netflix-top10-us.png",
+    "capture:all": "npm run capture:global && npm run capture:us",
+    "publish:telegram": "node scripts/publish-telegram.js --global outputs/netflix-top10-global.png --us outputs/netflix-top10-us.png",
+    "browser:install": "PLAYWRIGHT_BROWSERS_PATH=.ms-playwright npx playwright install chromium"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "devDependencies": {
+    "playwright": "^1.56.1"
+  }
+}

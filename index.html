@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="dark" />
+    <title>Netflix 剧集周榜前十</title>
+    <meta
+      name="description"
+      content="Netflix Tudum 官方每周剧集前十，支持全球榜和美国榜双榜切换。"
+    />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="page-shell">
+      <header class="masthead">
+        <div class="brand-row">
+          <span class="netflix-mark" aria-label="Netflix">N</span>
+          <span class="eyebrow">每周剧集榜</span>
+        </div>
+        <div class="hero-grid">
+          <section class="headline">
+            <h1>Netflix 剧集周榜前十</h1>
+            <p id="lede">全球榜与美国榜双榜切换</p>
+          </section>
+          <section class="control-panel" aria-label="榜单切换">
+            <div class="segmented" role="tablist" aria-label="选择榜单">
+              <button class="tab is-active" type="button" role="tab" aria-selected="true" data-chart="global">
+                全球榜
+              </button>
+              <button class="tab" type="button" role="tab" aria-selected="false" data-chart="us">
+                美国榜
+              </button>
+            </div>
+            <dl class="stats">
+              <div>
+                <dt>周期</dt>
+                <dd id="weekLabel">2026/4/27 - 2026/5/3</dd>
+              </div>
+              <div>
+                <dt id="primaryStatLabel">总观看量</dt>
+                <dd id="primaryStat">5210 万</dd>
+              </div>
+              <div>
+                <dt id="secondaryStatLabel">总观看时长</dt>
+                <dd id="secondaryStat">2.125 亿小时</dd>
+              </div>
+            </dl>
+          </section>
+        </div>
+      </header>
+
+      <section class="top-strip" id="topStrip" aria-label="前三名"></section>
+
+      <section class="ranking" id="ranking" aria-live="polite"></section>
+
+      <footer class="footer">
+        <span id="sourceLabel">数据来源：Netflix Tudum 官方前十榜</span>
+        <a id="sourceLink" href="https://www.netflix.com/tudum/top10/tv" target="_blank" rel="noreferrer">
+          官方来源
+        </a>
+      </footer>
+    </main>
+
+    <script src="app.js"></script>
+  </body>
+</html>
