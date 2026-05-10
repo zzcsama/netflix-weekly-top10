@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "update:data": "PLAYWRIGHT_BROWSERS_PATH=.ms-playwright node scripts/update-data.js",
     "capture:global": "PLAYWRIGHT_BROWSERS_PATH=.ms-playwright node scripts/capture-page.js --chart global --output outputs/netflix-top10-global.png",
     "capture:us": "PLAYWRIGHT_BROWSERS_PATH=.ms-playwright node scripts/capture-page.js --chart us --output outputs/netflix-top10-us.png",
     "capture:all": "npm run capture:global && npm run capture:us",
