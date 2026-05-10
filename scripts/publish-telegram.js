@@ -8,9 +8,12 @@ const usImagePath = args.us || "outputs/netflix-top10-us.png";
 const botToken = process.env.TELEGRAM_BOT_TOKEN;
 const chatId = process.env.TELEGRAM_CHAT_ID || process.env.TELEGRAM_CHANNEL;
 
-if (!botToken || !chatId) {
-  console.log("Skipped Telegram publish: TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID is not set.");
-  process.exit(0);
+if (!botToken) {
+  throw new Error("Missing TELEGRAM_BOT_TOKEN. Add it in Settings > Secrets and variables > Actions > Secrets.");
+}
+
+if (!chatId) {
+  throw new Error("Missing TELEGRAM_CHAT_ID or TELEGRAM_CHANNEL. Add one of them in Settings > Secrets and variables > Actions > Secrets.");
 }
 
 const images = [];
@@ -85,7 +88,7 @@ function loadCharts() {
 }
 
 function buildCaption(charts) {
-  const pageUrl = process.env.PUBLIC_PAGE_URL || "";
+  const pageUrl = process.env.PUBLIC_PAGE_URL || "https://zzcsama.github.io/netflix-weekly-top10/";
   const lines = [
     `Netflix 剧集周榜前十 · ${charts.global.week}`,
     "全球榜与美国榜双图推送",
