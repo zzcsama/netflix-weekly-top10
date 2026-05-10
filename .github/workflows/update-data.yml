@@ -14,6 +14,9 @@ permissions:
 jobs:
   update-data:
     runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -43,4 +46,5 @@ jobs:
         with:
           path: .
       - name: Deploy to GitHub Pages
+        id: deployment
         uses: actions/deploy-pages@v4
