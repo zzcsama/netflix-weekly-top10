@@ -1,6 +1,5 @@
 import { existsSync, readFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
-import vm from "node:vm";
 
 const args = parseArgs(process.argv.slice(2));
 const globalImagePath = args.global || "outputs/netflix-top10-global.png";
@@ -8,12 +7,8 @@ const usImagePath = args.us || "outputs/netflix-top10-us.png";
 const botToken = process.env.TELEGRAM_BOT_TOKEN;
 const chatId = process.env.TELEGRAM_CHAT_ID || process.env.TELEGRAM_CHANNEL;
 
-if (!botToken) {
-  throw new Error("Missing TELEGRAM_BOT_TOKEN. Add it in Settings > Secrets and variables > Actions > Secrets.");
-}
-
-if (!chatId) {
-  throw new Error("Missing TELEGRAM_CHAT_ID or TELEGRAM_CHANNEL. Add one of them in Settings > Secrets and variables > Actions > Secrets.");
+if (!botToken || !chatId) {
+  throw new Error("Missing TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID/TELEGRAM_CHANNEL.");
 }
 
 const images = [];
@@ -64,27 +59,11 @@ async function postTelegram(method, formData) {
 }
 
 function loadCharts() {
-  const source = readFileSync("app.js", "utf8");
-  const start = source.indexOf("const logos =");
-  const end = source.indexOf("const tabs =");
-  if (start === -1 || end === -1) {
-    throw new Error("Unable to read chart data from app.js.");
+  const data = JSON.parse(readFileSync("data/rankings.json", "utf8"));
+  if (!data.charts?.global || !data.charts?.us) {
+    throw new Error("Unable to read chart data from data/rankings.json.");
   }
-
-  const context = {
-    item: (rank, title, type, weeks, metricOne, metricTwo, logo, accent) => ({
-      rank,
-      title,
-      type,
-      weeks,
-      metricOne,
-      metricTwo,
-      logo,
-      accent
-    })
-  };
-  vm.runInNewContext(`${source.slice(start, end)}\nglobalThis.__charts = charts;`, context);
-  return context.__charts;
+  return data.charts;
 }
 
 function buildCaption(charts) {
