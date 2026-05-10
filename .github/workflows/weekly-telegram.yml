@@ -16,7 +16,7 @@ jobs:
       TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
       TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
       TELEGRAM_CHANNEL: ${{ secrets.TELEGRAM_CHANNEL }}
-      PUBLIC_PAGE_URL: ${{ vars.PUBLIC_PAGE_URL }}
+      PUBLIC_PAGE_URL: https://zzcsama.github.io/netflix-weekly-top10/
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
