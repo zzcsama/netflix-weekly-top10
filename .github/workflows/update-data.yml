@@ -6,6 +6,7 @@ on:
     paths:
       - data/rankings.json
       - .github/workflows/update-data.yml
+      - README.md
   schedule:
     # Every Wednesday at 19:00 in Asia/Shanghai, after Netflix's weekly chart is usually live.
     - cron: "0 11 * * 3"
