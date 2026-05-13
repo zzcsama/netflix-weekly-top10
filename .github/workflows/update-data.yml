@@ -1,9 +1,14 @@
-name: Update Netflix Ranking Data
+name: Update and Publish Netflix Ranking Data
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - data/rankings.json
+      - .github/workflows/update-data.yml
   schedule:
-    # Every Wednesday at 18:30 in Asia/Shanghai, after Netflix's weekly chart is usually live.
-    - cron: "30 10 * * 3"
+    # Every Wednesday at 19:00 in Asia/Shanghai, after Netflix's weekly chart is usually live.
+    - cron: "0 11 * * 3"
   workflow_dispatch:
 
 permissions:
@@ -17,6 +22,11 @@ jobs:
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
+    env:
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      TELEGRAM_CHANNEL: ${{ secrets.TELEGRAM_CHANNEL }}
+      PUBLIC_PAGE_URL: https://zzcsama.github.io/netflix-weekly-top10/
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -48,3 +58,7 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
+      - name: Capture ranking images
+        run: npm run capture:all
+      - name: Publish to Telegram
+        run: npm run publish:telegram
