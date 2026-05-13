@@ -315,11 +315,12 @@ function localizeTitle(originalTitle) {
     };
   }
 
-  const seasonMatch = originalTitle.match(/^(.*?): Season (\d+)$/);
+  const seasonMatch = originalTitle.match(/^(.*?): Season (\d+)(?: - (.+))?$/);
   if (seasonMatch) {
     const base = translateBaseTitle(seasonMatch[1]);
+    const subtitle = seasonMatch[3] ? ` - ${translateSubtitle(seasonMatch[3])}` : "";
     return {
-      title: `${base}：第 ${Number(seasonMatch[2])} 季`,
+      title: `${base}：第 ${Number(seasonMatch[2])} 季${subtitle}`,
       type: `第 ${Number(seasonMatch[2])} 季`
     };
   }
@@ -350,8 +351,22 @@ function translateBaseTitle(title) {
       "Salish & Jordan Matter": "萨利什与乔丹·马特",
       "Stranger Things: Tales From '85": "怪奇物语：85 年传说",
       "La Brea": "拉布雷亚",
-      "Homicide Squad: New Orleans": "凶案小组：新奥尔良"
+      "Homicide Squad: New Orleans": "凶案小组：新奥尔良",
+      "Worst Ex Ever": "最糟前任",
+      Legends: "传奇卧底",
+      "Lord of the Flies": "蝇王",
+      "Funny AF with Kevin Hart": "凯文·哈特爆笑现场",
+      "The Roast of Kevin Hart": "凯文·哈特吐槽大会"
     }[title] || title
+  );
+}
+
+function translateSubtitle(subtitle) {
+  return (
+    {
+      "The Live Semifinals": "直播半决赛",
+      "Homecoming: The Live Finale": "返场：直播决赛"
+    }[subtitle] || subtitle
   );
 }
 
