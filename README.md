@@ -1,6 +1,6 @@
 # Netflix 剧集周榜前十
 
-静态页面支持全球榜和美国榜切换。项目会每周自动抓取 Netflix Tudum 官方最新周榜、提交数据更新，并在每周三北京时间 09:00 自动截图推送到 Telegram。
+静态页面支持全球榜和美国榜切换。项目会每周自动抓取 Netflix Tudum 官方最新周榜、提交数据更新，并在每周三北京时间 19:00 自动截图推送到 Telegram。
 
 ## 本地预览
 
@@ -14,7 +14,7 @@ npx http-server . -p 4173
 
 ## 自动更新数据
 
-工作流在 `.github/workflows/update-data.yml`，触发时间是每周三北京时间 08:00。它会抓取：
+工作流在 `.github/workflows/update-data.yml`，触发时间是每周三北京时间 18:30。它会抓取：
 
 ```text
 https://www.netflix.com/tudum/top10/tv
@@ -32,4 +32,4 @@ TELEGRAM_BOT_TOKEN
 TELEGRAM_CHAT_ID
 ```
 
-如果你原来用的是 `TELEGRAM_CHANNEL`，脚本也会自动兼容。工作流在 `.github/workflows/weekly-telegram.yml`，触发时间是每周三北京时间 09:00。
+如果你原来用的是 `TELEGRAM_CHANNEL`，脚本也会自动兼容。工作流在 `.github/workflows/weekly-telegram.yml`，触发时间是每周三北京时间 19:00。
