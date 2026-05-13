@@ -1,9 +1,6 @@
 name: Publish Netflix Weekly Top 10
 
 on:
-  schedule:
-    # Every Wednesday at 19:00 in Asia/Shanghai, expressed in UTC.
-    - cron: "0 11 * * 3"
   workflow_dispatch:
 
 permissions:
