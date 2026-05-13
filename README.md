@@ -32,4 +32,4 @@ TELEGRAM_BOT_TOKEN
 TELEGRAM_CHAT_ID
 ```
 
-如果你原来用的是 `TELEGRAM_CHANNEL`，脚本也会自动兼容。`.github/workflows/weekly-telegram.yml` 保留为手动补发入口。
+如果你原来用的是 `TELEGRAM_CHANNEL`，脚本也会自动兼容。`.github/workflows/weekly-telegram.yml` 保留为手动补发入口；需要立即补发时，也可以手动运行 `Update and Publish Netflix Ranking Data`。
