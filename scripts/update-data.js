@@ -7,6 +7,8 @@ const args = parseArgs(process.argv.slice(2));
 const outputPath = resolve(args.output || "data/rankings.json");
 const previousData = await readExistingData(outputPath);
 const previousItems = indexPreviousItems(previousData);
+const userAgent =
+  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36";
 
 const sources = {
   global: {
@@ -31,20 +33,12 @@ const sources = {
   }
 };
 
-const browser = await chromium.launch({ headless: true });
+let browser;
 try {
-  const context = await browser.newContext({
-    locale: "en-US",
-    viewport: { width: 1440, height: 1600 },
-    userAgent:
-      "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36"
-  });
   const charts = {};
 
   for (const [key, source] of Object.entries(sources)) {
-    const page = await context.newPage();
-    charts[key] = await scrapeChart(page, key, source);
-    await page.close();
+    charts[key] = await scrapeChart(key, source);
   }
 
   const nextData = {
@@ -61,33 +55,78 @@ try {
     console.log(`Updated ${outputPath} with ${charts.global.week} rankings.`);
   }
 } finally {
-  await browser.close();
+  await browser?.close();
 }
 
-async function scrapeChart(page, key, source) {
-  await page.goto(source.source, { waitUntil: "domcontentloaded", timeout: 90_000 });
-  await page.waitForLoadState("networkidle", { timeout: 45_000 }).catch(() => {});
-  await page.waitForFunction(
-    ({ place }) => {
-      const text = document.body?.innerText || "";
-      return text.includes(`${place} |`) && /Top 10 Shows.*overview/i.test(text);
-    },
-    { place: source.place },
-    { timeout: 20_000 }
-  ).catch(() => {
-    console.warn(`Chart overview was slow to appear for ${source.label}; parsing the current page snapshot.`);
+async function scrapeChart(key, source) {
+  try {
+    return buildChart(await fetchStaticSnapshot(source), key, source);
+  } catch (error) {
+    console.warn(`Static Netflix parse failed for ${source.label}: ${error.message}`);
+    return scrapeChartWithBrowser(key, source);
+  }
+}
+
+async function scrapeChartWithBrowser(key, source) {
+  browser ||= await chromium.launch({ headless: true });
+  const context = await browser.newContext({
+    locale: "en-US",
+    viewport: { width: 1440, height: 1600 },
+    userAgent
   });
-  await warmLazyImages(page);
+  const page = await context.newPage();
 
-  const snapshot = await page.evaluate(() => ({
-    text: document.body.innerText,
-    images: [...document.images].map((img) => ({
-      alt: img.alt || "",
-      src: img.currentSrc || img.src || "",
-      srcset: img.getAttribute("srcset") || ""
-    }))
-  }));
+  try {
+    await page.goto(source.source, { waitUntil: "domcontentloaded", timeout: 90_000 });
+    await page.waitForLoadState("networkidle", { timeout: 45_000 }).catch(() => {});
+    await page.waitForFunction(
+      ({ place }) => {
+        const text = document.body?.innerText || "";
+        return text.includes(`${place} |`) && /Top 10 Shows.*overview/i.test(text);
+      },
+      { place: source.place },
+      { timeout: 20_000 }
+    ).catch(() => {
+      console.warn(`Chart overview was slow to appear for ${source.label}; parsing the current page snapshot.`);
+    });
+    await warmLazyImages(page);
 
+    const snapshot = await page.evaluate(() => ({
+      text: document.body.innerText,
+      images: [...document.images].map((img) => ({
+        alt: img.alt || "",
+        src: img.currentSrc || img.src || "",
+        srcset: img.getAttribute("srcset") || ""
+      }))
+    }));
+
+    return buildChart(snapshot, key, source);
+  } finally {
+    await context.close();
+  }
+}
+
+async function fetchStaticSnapshot(source) {
+  const response = await fetch(source.source, {
+    headers: {
+      "user-agent": userAgent,
+      "accept-language": "en-US,en;q=0.9",
+      accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+    }
+  });
+
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status} while fetching ${source.source}`);
+  }
+
+  const html = await response.text();
+  return {
+    text: htmlToText(html),
+    images: extractHtmlImages(html)
+  };
+}
+
+function buildChart(snapshot, key, source) {
   const lines = normalizeVisibleLines(snapshot.text);
   const week = normalizeWeek(extractWeek(lines, source.place));
   const rows = parseRows(extractOverviewSegment(lines, source), key);
@@ -142,14 +181,73 @@ async function warmLazyImages(page) {
   await page.waitForTimeout(250);
 }
 
+function htmlToText(html) {
+  return decodeHtmlEntities(
+    String(html || "")
+      .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, " ")
+      .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, " ")
+      .replace(/<svg\b[^>]*>[\s\S]*?<\/svg>/gi, " ")
+      .replace(/<br\s*\/?>/gi, "\n")
+      .replace(/<\/(p|div|li|h[1-6]|tr|td|th|section|article|button|a)>/gi, "\n")
+      .replace(/<[^>]+>/g, " ")
+  );
+}
+
+function extractHtmlImages(html) {
+  const images = [];
+  const imageTags = String(html || "").matchAll(/<img\b[^>]*>/gi);
+
+  for (const [tag] of imageTags) {
+    images.push({
+      alt: decodeHtmlEntities(readHtmlAttr(tag, "alt")),
+      src: decodeHtmlEntities(readHtmlAttr(tag, "src")),
+      srcset: decodeHtmlEntities(readHtmlAttr(tag, "srcset"))
+    });
+  }
+
+  return images;
+}
+
+function readHtmlAttr(tag, name) {
+  const pattern = new RegExp(`${name}\\s*=\\s*(["'])(.*?)\\1`, "i");
+  return tag.match(pattern)?.[2] || "";
+}
+
+function decodeHtmlEntities(value) {
+  return String(value || "").replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (entity, body) => {
+    if (body[0] === "#") {
+      const codePoint = body[1]?.toLowerCase() === "x" ? Number.parseInt(body.slice(2), 16) : Number.parseInt(body.slice(1), 10);
+      return Number.isFinite(codePoint) ? String.fromCodePoint(codePoint) : entity;
+    }
+
+    return {
+      amp: "&",
+      apos: "'",
+      gt: ">",
+      lt: "<",
+      nbsp: " ",
+      quot: "\""
+    }[body.toLowerCase()] || entity;
+  });
+}
+
 function extractWeek(lines, place) {
   const pattern = new RegExp(`^${escapeRegExp(place)}\\s*\\|\\s*\\d{1,2}\\/\\d{1,2}\\/\\d{2}\\s*-\\s*\\d{1,2}\\/\\d{1,2}\\/\\d{2}$`);
   const line = lines.find((entry) => pattern.test(entry));
-  if (!line) {
-    throw new Error(`Unable to find ${place} week range.`);
+  if (line) {
+    return line.split("|")[1].trim();
   }
 
-  return line.split("|")[1].trim();
+  const joined = lines.join("\n");
+  const joinedMatch = joined.match(
+    new RegExp(`${escapeRegExp(place)}\\s*\\|\\s*(\\d{1,2}\\/\\d{1,2}\\/\\d{2}\\s*-\\s*\\d{1,2}\\/\\d{1,2}\\/\\d{2})`)
+  );
+  if (joinedMatch) return joinedMatch[1].trim();
+
+  const standalone = lines.find((entry) => /^\d{1,2}\/\d{1,2}\/\d{2}\s*-\s*\d{1,2}\/\d{1,2}\/\d{2}$/.test(entry));
+  if (standalone) return standalone;
+
+  throw new Error(`Unable to find ${place} week range.`);
 }
 
 function extractOverviewSegment(lines, source) {
@@ -434,13 +532,15 @@ function parseRank(value) {
 
 function cleanRowText(value) {
   return String(value || "")
+    .replace(/\[Button:\s*([^\]]+)\]/g, "$1")
     .replace(/Image/g, " ")
+    .replace(/\|/g, " ")
     .replace(/\s+/g, " ")
     .trim();
 }
 
 function isHeaderCell(value) {
-  return /^(Ranking|Views|Runtime|Hours Viewed)$/i.test(value);
+  return /^(Ranking|Views|Runtime|Hours Viewed|Weeks in Top 10)$/i.test(value);
 }
 
 function normalizeVisibleLines(text) {
