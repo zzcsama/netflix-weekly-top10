@@ -5,6 +5,10 @@ on:
     branches: [main]
     paths:
       - data/rankings.json
+      - scripts/update-data.js
+      - scripts/capture-page.js
+      - scripts/publish-telegram.js
+      - package.json
   schedule:
     # Wednesday 21:17 in Asia/Shanghai. Avoid minute 0 because GitHub can drop busy scheduled runs.
     - cron: "17 13 * * 3"
