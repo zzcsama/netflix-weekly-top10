@@ -11,6 +11,11 @@ const secondaryStatLabel = document.querySelector("#secondaryStatLabel");
 const secondaryStat = document.querySelector("#secondaryStat");
 const sourceLabel = document.querySelector("#sourceLabel");
 const sourceLink = document.querySelector("#sourceLink");
+const chartTitle = document.querySelector("#chartTitle");
+const chartMeta = document.querySelector("#chartMeta");
+const overviewTitle = document.querySelector("#overviewTitle");
+const metricOneHead = document.querySelector("#metricOneHead");
+const metricTwoHead = document.querySelector("#metricTwoHead");
 
 init();
 
@@ -61,6 +66,11 @@ function render(chartKey) {
   primaryStat.textContent = chart.primary;
   secondaryStatLabel.textContent = chart.secondaryLabel;
   secondaryStat.textContent = chart.secondary;
+  chartTitle.textContent = chartKey === "global" ? "Global Top 10 Shows" : "Top 10 Shows in United States";
+  chartMeta.textContent = chartKey === "global" ? "Global | Shows | English" : "United States | Shows";
+  overviewTitle.textContent = chartKey === "global" ? "Top 10 Shows overview" : "Top 10 Shows in United States overview";
+  metricOneHead.textContent = chart.metricOneLabel;
+  metricTwoHead.textContent = chart.metricTwoLabel;
   sourceLabel.textContent = `数据来源：Netflix Tudum 官方前十榜 · ${chart.label}`;
   sourceLink.href = chart.source;
 
@@ -73,8 +83,11 @@ function renderTopCard(entry) {
   card.className = "top-card";
   card.style.setProperty("--accent", entry.accent || "#e50914");
   card.innerHTML = `
+    <div class="top-art">
+      ${renderArtwork(entry)}
+    </div>
     <div class="top-card-inner">
-      <span class="top-rank">${entry.rank}</span>
+      <span class="top-rank">#${entry.rank}</span>
       <div class="logo-wrap">
         ${renderLogo(entry)}
       </div>
@@ -97,9 +110,9 @@ function renderRow(entry, chart) {
   row.target = "_blank";
   row.rel = "noreferrer";
   row.innerHTML = `
-    <span class="rank-box">${entry.rank}</span>
-    <span class="logo-tile">
-      ${renderLogo(entry)}
+    <span class="rank-box">${String(entry.rank).padStart(2, "0")}</span>
+    <span class="art-tile">
+      ${renderArtwork(entry)}
     </span>
     <span class="show-copy">
       <strong class="show-title">${escapeHtml(entry.title)}</strong>
@@ -116,8 +129,16 @@ function renderRow(entry, chart) {
       <span>${escapeHtml(chart.metricTwoLabel)}</span>
       <strong>${escapeHtml(entry.metricTwo)}</strong>
     </span>
-  `;
+`;
   return row;
+}
+
+function renderArtwork(entry) {
+  if (entry.logo) {
+    return `<img class="show-art" src="${escapeHtml(entry.logo)}" alt="${escapeHtml(entry.title)}" loading="lazy" />`;
+  }
+
+  return `<span class="art-fallback">${escapeHtml(entry.originalTitle || entry.title)}</span>`;
 }
 
 function renderLogo(entry) {

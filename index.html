@@ -15,12 +15,13 @@
     <main class="page-shell">
       <header class="masthead">
         <div class="brand-row">
-          <span class="netflix-mark" aria-label="Netflix">N</span>
-          <span class="eyebrow">每周剧集榜</span>
+          <span class="netflix-wordmark" aria-label="Netflix">NETFLIX</span>
+          <span class="nav-pill">TOP 10</span>
         </div>
         <div class="hero-grid">
           <section class="headline">
-            <h1>Netflix 剧集周榜前十</h1>
+            <span class="eyebrow">Top 10 Shows</span>
+            <h1>Top 10 Shows on Netflix Right Now</h1>
             <p id="lede">全球榜与美国榜双榜切换</p>
           </section>
           <section class="control-panel" aria-label="榜单切换">
@@ -50,9 +51,26 @@
         </div>
       </header>
 
-      <section class="top-strip" id="topStrip" aria-label="前三名"></section>
+      <section class="spotlight" aria-label="前三名">
+        <div class="section-heading">
+          <h2 id="chartTitle">Global Top 10 Shows</h2>
+          <span id="chartMeta">Shows | English</span>
+        </div>
+        <div class="top-strip" id="topStrip"></div>
+      </section>
 
-      <section class="ranking" id="ranking" aria-live="polite"></section>
+      <section class="overview" aria-label="榜单概览">
+        <div class="section-heading">
+          <h2 id="overviewTitle">Top 10 Shows overview</h2>
+        </div>
+        <div class="table-head" aria-hidden="true">
+          <span>Ranking</span>
+          <span>Title</span>
+          <span id="metricOneHead">Views</span>
+          <span id="metricTwoHead">Hours Viewed</span>
+        </div>
+        <section class="ranking" id="ranking" aria-live="polite"></section>
+      </section>
 
       <footer class="footer">
         <span id="sourceLabel">数据来源：Netflix Tudum 官方前十榜</span>

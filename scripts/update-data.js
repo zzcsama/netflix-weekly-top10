@@ -86,7 +86,11 @@ async function fetchChart(key, source) {
   }
 
   const week = weekRangeFromEndDate(latestWeek);
-  const items = latestRows.map((row) => transformRow(row, key));
+  const logoMap = await fetchLogoMap(source.source).catch((error) => {
+    console.warn(`Unable to fetch Netflix title images for ${source.label}: ${error.message}`);
+    return new Map();
+  });
+  const items = latestRows.map((row) => transformRow(row, key, logoMap));
 
   if (key === "global") {
     const totalViews = latestRows.reduce((sum, row) => sum + metricNumber(row.weekly_views), 0);
@@ -146,6 +150,74 @@ async function fetchTsvRows(urls) {
   }
 
   throw new Error(errors.join(" | "));
+}
+
+async function fetchLogoMap(sourceUrl) {
+  const response = await fetch(sourceUrl, {
+    headers: {
+      "user-agent": userAgent,
+      "accept-language": "en-US,en;q=0.9",
+      accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+    }
+  });
+
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}`);
+  }
+
+  return buildLogoMap(extractHtmlImages(await response.text()));
+}
+
+function extractHtmlImages(html) {
+  const images = [];
+  const source = String(html || "");
+  const imageTags = source.matchAll(/<img\b[^>]*>/gi);
+
+  for (const [tag] of imageTags) {
+    images.push({
+      alt: decodeHtmlEntities(readHtmlAttr(tag, "alt")),
+      src: decodeHtmlEntities(readHtmlAttr(tag, "src")),
+      srcset: decodeHtmlEntities(readHtmlAttr(tag, "srcset"))
+    });
+  }
+
+  const imageLinks = source.matchAll(/<a\b([^>]*)>([\s\S]*?)<\/a>/gi);
+  for (const [, attrs, content] of imageLinks) {
+    const href = decodeHtmlEntities(readHtmlAttr(attrs, "href"));
+    if (!isNetflixImageUrl(href)) continue;
+
+    images.push({
+      alt: decodeHtmlEntities(
+        readHtmlAttr(attrs, "aria-label") ||
+          readHtmlAttr(attrs, "title") ||
+          readHtmlAttr(attrs, "alt") ||
+          stripTags(content)
+      ),
+      src: href,
+      srcset: ""
+    });
+  }
+
+  return images;
+}
+
+function buildLogoMap(images) {
+  const result = new Map();
+
+  for (const image of images) {
+    const title = cleanImageTitle(image.alt);
+    const src = image.src || firstSrcsetUrl(image.srcset);
+    if (!title || !src || title === "Image") continue;
+
+    for (const key of titleKeys(title)) {
+      const current = result.get(key);
+      if (!current || logoScore(src) > logoScore(current)) {
+        result.set(key, src);
+      }
+    }
+  }
+
+  return result;
 }
 
 function filterRows(rows, source) {
@@ -218,7 +290,7 @@ function parseWeekDate(value) {
   throw new Error(`Invalid TSV week value: ${value}`);
 }
 
-function transformRow(row, key) {
+function transformRow(row, key, logoMap) {
   const originalTitle = tsvTitle(row);
   const titleInfo = localizeTitle(originalTitle);
   const previous = previousItems.get(normalizeTitle(originalTitle));
@@ -234,7 +306,7 @@ function transformRow(row, key) {
     weeks: `上榜 ${weeks} 周`,
     metricOne: key === "global" ? formatCount(views) : `${weeks} 周`,
     metricTwo: key === "global" ? `${formatCount(hours)}小时` : titleInfo.type,
-    logo: previous?.logo || "",
+    logo: pickLogo(originalTitle, logoMap) || previous?.logo || "",
     accent: previous?.accent || accentForTitle(originalTitle)
   };
 }
@@ -246,6 +318,75 @@ function tsvTitle(row) {
 function metricNumber(value) {
   const number = Number(String(value ?? "").replace(/,/g, "").trim());
   return Number.isFinite(number) ? number : 0;
+}
+
+function pickLogo(title, logoMap) {
+  for (const key of titleKeys(title)) {
+    const logo = logoMap.get(key);
+    if (logo) return logo;
+  }
+
+  return "";
+}
+
+function titleKeys(title) {
+  const base = stripSeriesSuffix(title);
+  return [...new Set([normalizeTitle(title), normalizeTitle(base)])].filter(Boolean);
+}
+
+function cleanImageTitle(value) {
+  return String(value || "")
+    .replace(/^Image:\s*/i, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function firstSrcsetUrl(value) {
+  return String(value || "")
+    .split(",")
+    .map((entry) => entry.trim().split(/\s+/)[0])
+    .find(Boolean) || "";
+}
+
+function isNetflixImageUrl(value) {
+  return /^https:\/\/dnm\.nflximg\.net\/.+\.(?:png|webp|jpe?g)(?:\?|$)/i.test(String(value || ""));
+}
+
+function stripTags(value) {
+  return String(value || "")
+    .replace(/<[^>]*>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function logoScore(src) {
+  if (/\.png(?:\?|$)/i.test(src)) return 4;
+  if (/\.webp(?:\?|$)/i.test(src)) return 3;
+  if (/\.jpe?g(?:\?|$)/i.test(src)) return 2;
+  return 1;
+}
+
+function readHtmlAttr(tag, name) {
+  const pattern = new RegExp(`${name}\\s*=\\s*(["'])(.*?)\\1`, "i");
+  return tag.match(pattern)?.[2] || "";
+}
+
+function decodeHtmlEntities(value) {
+  return String(value || "").replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (entity, body) => {
+    if (body[0] === "#") {
+      const codePoint = body[1]?.toLowerCase() === "x" ? Number.parseInt(body.slice(2), 16) : Number.parseInt(body.slice(1), 10);
+      return Number.isFinite(codePoint) ? String.fromCodePoint(codePoint) : entity;
+    }
+
+    return {
+      amp: "&",
+      apos: "'",
+      gt: ">",
+      lt: "<",
+      nbsp: " ",
+      quot: "\""
+    }[body.toLowerCase()] || entity;
+  });
 }
 
 function localizeTitle(originalTitle) {
@@ -387,6 +528,7 @@ function chartSignature(chart) {
     .map((item) => [
       item.rank,
       normalizeTitle(item.originalTitle || item.title || ""),
+      item.logo || "",
       item.weeks,
       item.metricOne,
       item.metricTwo
