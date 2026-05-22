@@ -52,9 +52,14 @@ try {
     charts
   };
 
-  await mkdir(dirname(outputPath), { recursive: true });
-  await writeFile(outputPath, `${JSON.stringify(nextData, null, 2)}\n`, "utf8");
-  console.log(`Updated ${outputPath} with ${charts.global.week} rankings.`);
+  if (hasSamePublishedCharts(previousData, nextData)) {
+    console.log(`Netflix rankings are already current for ${charts.global.week}.`);
+    process.exitCode = 0;
+  } else {
+    await mkdir(dirname(outputPath), { recursive: true });
+    await writeFile(outputPath, `${JSON.stringify(nextData, null, 2)}\n`, "utf8");
+    console.log(`Updated ${outputPath} with ${charts.global.week} rankings.`);
+  }
 } finally {
   await browser.close();
 }
@@ -348,6 +353,9 @@ function translateBaseTitle(title) {
       "Running Point": "运营核心",
       "Hulk Hogan: Real American": "胡克·霍根：真美国人",
       "Danny Go!": "丹尼出发！",
+      "Devil May Cry": "鬼泣",
+      Nemesis: "宿敌",
+      "Perfect Match": "完美匹配",
       "Salish & Jordan Matter": "萨利什与乔丹·马特",
       "Stranger Things: Tales From '85": "怪奇物语：85 年传说",
       "La Brea": "拉布雷亚",
@@ -462,6 +470,29 @@ function indexPreviousItems(data) {
     }
   }
   return result;
+}
+
+function hasSamePublishedCharts(previous, next) {
+  if (!previous?.charts || !next?.charts) return false;
+
+  return ["global", "us"].every((key) => {
+    const previousChart = previous.charts[key];
+    const nextChart = next.charts[key];
+    if (!previousChart || !nextChart || previousChart.week !== nextChart.week) return false;
+    return chartSignature(previousChart) === chartSignature(nextChart);
+  });
+}
+
+function chartSignature(chart) {
+  return (chart.items || [])
+    .map((item) => [
+      item.rank,
+      normalizeTitle(item.originalTitle || item.title || ""),
+      item.weeks,
+      item.metricOne,
+      item.metricTwo
+    ].join(":"))
+    .join("|");
 }
 
 async function readExistingData(path) {
