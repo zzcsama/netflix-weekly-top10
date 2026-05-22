@@ -44,8 +44,6 @@ jobs:
           node-version: 22
       - name: Install dependencies
         run: npm install
-      - name: Install browser
-        run: PLAYWRIGHT_BROWSERS_PATH=.ms-playwright npx playwright install --with-deps chromium
       - name: Fetch latest Netflix ranking data
         run: npm run update:data
       - name: Commit updated ranking data
@@ -68,6 +66,9 @@ jobs:
             echo "changed=true" >> "$GITHUB_OUTPUT"
             echo "should_publish=true" >> "$GITHUB_OUTPUT"
           fi
+      - name: Install browser
+        if: steps.commit-data.outputs.should_publish == 'true'
+        run: PLAYWRIGHT_BROWSERS_PATH=.ms-playwright npx playwright install --with-deps chromium
       - name: Capture ranking images
         if: steps.commit-data.outputs.should_publish == 'true'
         run: npm run capture:all
