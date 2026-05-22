@@ -1,7 +1,6 @@
 import { existsSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
-import { chromium } from "playwright";
 
 const args = parseArgs(process.argv.slice(2));
 const outputPath = resolve(args.output || "data/rankings.json");
@@ -13,9 +12,12 @@ const userAgent =
 const sources = {
   global: {
     label: "全球榜",
-    place: "Global",
     source: "https://www.netflix.com/tudum/top10/tv",
-    overviewPattern: /Top 10 Shows overview/i,
+    dataUrls: [
+      "https://www.netflix.com/tudum/top10/data/all-weeks-global.tsv",
+      "https://top10.netflix.com/data/all-weeks-global.tsv"
+    ],
+    category: "TV (English)",
     primaryLabel: "总观看量",
     secondaryLabel: "总观看时长",
     metricOneLabel: "观看量",
@@ -23,9 +25,13 @@ const sources = {
   },
   us: {
     label: "美国榜",
-    place: "United States",
     source: "https://www.netflix.com/tudum/top10/united-states/tv",
-    overviewPattern: /Top 10 Shows in United States overview/i,
+    dataUrls: [
+      "https://www.netflix.com/tudum/top10/data/all-weeks-countries.tsv",
+      "https://top10.netflix.com/data/all-weeks-countries.tsv"
+    ],
+    country: "United States",
+    category: "TV",
     primaryLabel: "榜单数量",
     secondaryLabel: "合计上榜",
     metricOneLabel: "上榜",
@@ -33,113 +39,58 @@ const sources = {
   }
 };
 
-let browser;
-try {
-  const charts = {};
-
-  for (const [key, source] of Object.entries(sources)) {
-    charts[key] = await scrapeChart(key, source);
-  }
-
-  const nextData = {
-    updatedAt: new Date().toISOString(),
-    charts
-  };
-
-  if (hasSamePublishedCharts(previousData, nextData)) {
-    console.log(`Netflix rankings are already current for ${charts.global.week}.`);
-    process.exitCode = 0;
-  } else {
-    await mkdir(dirname(outputPath), { recursive: true });
-    await writeFile(outputPath, `${JSON.stringify(nextData, null, 2)}\n`, "utf8");
-    console.log(`Updated ${outputPath} with ${charts.global.week} rankings.`);
-  }
-} finally {
-  await browser?.close();
+const charts = {};
+for (const [key, source] of Object.entries(sources)) {
+  charts[key] = await loadChart(key, source);
 }
 
-async function scrapeChart(key, source) {
+const nextData = {
+  updatedAt: new Date().toISOString(),
+  charts
+};
+
+if (hasSamePublishedCharts(previousData, nextData)) {
+  console.log(`Netflix rankings are already current for ${charts.global.week}.`);
+} else {
+  await mkdir(dirname(outputPath), { recursive: true });
+  await writeFile(outputPath, `${JSON.stringify(nextData, null, 2)}\n`, "utf8");
+  console.log(`Updated ${outputPath} with ${charts.global.week} rankings.`);
+}
+
+async function loadChart(key, source) {
   try {
-    return buildChart(await fetchStaticSnapshot(source), key, source);
+    const chart = await fetchChart(key, source);
+    console.log(`Loaded ${source.label} from official Netflix TSV for ${chart.week}.`);
+    return chart;
   } catch (error) {
-    console.warn(`Static Netflix parse failed for ${source.label}: ${error.message}`);
-    return scrapeChartWithBrowser(key, source);
-  }
-}
-
-async function scrapeChartWithBrowser(key, source) {
-  browser ||= await chromium.launch({ headless: true });
-  const context = await browser.newContext({
-    locale: "en-US",
-    viewport: { width: 1440, height: 1600 },
-    userAgent
-  });
-  const page = await context.newPage();
-
-  try {
-    await page.goto(source.source, { waitUntil: "domcontentloaded", timeout: 90_000 });
-    await page.waitForLoadState("networkidle", { timeout: 45_000 }).catch(() => {});
-    await page.waitForFunction(
-      ({ place }) => {
-        const text = document.body?.innerText || "";
-        return text.includes(`${place} |`) && /Top 10 Shows.*overview/i.test(text);
-      },
-      { place: source.place },
-      { timeout: 20_000 }
-    ).catch(() => {
-      console.warn(`Chart overview was slow to appear for ${source.label}; parsing the current page snapshot.`);
-    });
-    await warmLazyImages(page);
-
-    const snapshot = await page.evaluate(() => ({
-      text: document.body.innerText,
-      images: [...document.images].map((img) => ({
-        alt: img.alt || "",
-        src: img.currentSrc || img.src || "",
-        srcset: img.getAttribute("srcset") || ""
-      }))
-    }));
-
-    return buildChart(snapshot, key, source);
-  } finally {
-    await context.close();
-  }
-}
-
-async function fetchStaticSnapshot(source) {
-  const response = await fetch(source.source, {
-    headers: {
-      "user-agent": userAgent,
-      "accept-language": "en-US,en;q=0.9",
-      accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+    const previousChart = previousData?.charts?.[key];
+    if (previousChart?.items?.length === 10) {
+      console.warn(`Using previous ${source.label} data because official Netflix TSV failed: ${error.message}`);
+      return previousChart;
     }
-  });
-
-  if (!response.ok) {
-    throw new Error(`HTTP ${response.status} while fetching ${source.source}`);
+    throw error;
   }
-
-  const html = await response.text();
-  return {
-    text: htmlToText(html),
-    images: extractHtmlImages(html)
-  };
 }
 
-function buildChart(snapshot, key, source) {
-  const lines = normalizeVisibleLines(snapshot.text);
-  const week = normalizeWeek(extractWeek(lines, source.place));
-  const rows = parseRows(extractOverviewSegment(lines, source), key);
-  const logoMap = buildLogoMap(snapshot.images);
-  const items = rows.map((row) => transformRow(row, key, logoMap));
+async function fetchChart(key, source) {
+  const rows = await fetchTsvRows(source.dataUrls);
+  const filtered = filterRows(rows, source);
+  const latestWeek = latestWeekValue(filtered);
+  const latestRows = filtered
+    .filter((row) => row.week === latestWeek)
+    .sort((left, right) => metricNumber(left.weekly_rank) - metricNumber(right.weekly_rank))
+    .slice(0, 10);
 
-  if (items.length !== 10) {
-    throw new Error(`Expected 10 ${key} rows, found ${items.length}.`);
+  if (latestRows.length !== 10) {
+    throw new Error(`Expected 10 ${source.label} TSV rows, found ${latestRows.length}.`);
   }
+
+  const week = weekRangeFromEndDate(latestWeek);
+  const items = latestRows.map((row) => transformRow(row, key));
 
   if (key === "global") {
-    const totalViews = rows.reduce((sum, row) => sum + row.views, 0);
-    const totalHours = rows.reduce((sum, row) => sum + row.hours, 0);
+    const totalViews = latestRows.reduce((sum, row) => sum + metricNumber(row.weekly_views), 0);
+    const totalHours = latestRows.reduce((sum, row) => sum + metricNumber(row.weekly_hours_viewed), 0);
 
     return {
       label: source.label,
@@ -156,7 +107,7 @@ function buildChart(snapshot, key, source) {
     };
   }
 
-  const totalWeeks = rows.reduce((sum, row) => sum + row.weeks, 0);
+  const totalWeeks = latestRows.reduce((sum, row) => sum + metricNumber(row.cumulative_weeks_in_top_10), 0);
   return {
     label: source.label,
     lede: `Netflix 美国剧集周榜 · ${week}`,
@@ -172,246 +123,129 @@ function buildChart(snapshot, key, source) {
   };
 }
 
-async function warmLazyImages(page) {
-  for (const y of [0, 500, 1000, 1500, 2200, 3000]) {
-    await page.evaluate((scrollY) => window.scrollTo(0, scrollY), y);
-    await page.waitForTimeout(250);
-  }
-  await page.evaluate(() => window.scrollTo(0, 0));
-  await page.waitForTimeout(250);
-}
+async function fetchTsvRows(urls) {
+  const errors = [];
 
-function htmlToText(html) {
-  return decodeHtmlEntities(
-    String(html || "")
-      .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, " ")
-      .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, " ")
-      .replace(/<svg\b[^>]*>[\s\S]*?<\/svg>/gi, " ")
-      .replace(/<br\s*\/?>/gi, "\n")
-      .replace(/<\/(p|div|li|h[1-6]|tr|td|th|section|article|button|a)>/gi, "\n")
-      .replace(/<[^>]+>/g, " ")
-  );
-}
+  for (const url of urls) {
+    try {
+      const response = await fetch(url, {
+        headers: {
+          "user-agent": userAgent,
+          "accept-language": "en-US,en;q=0.9",
+          accept: "text/tab-separated-values,text/plain,*/*;q=0.8"
+        }
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
 
-function extractHtmlImages(html) {
-  const images = [];
-  const imageTags = String(html || "").matchAll(/<img\b[^>]*>/gi);
-
-  for (const [tag] of imageTags) {
-    images.push({
-      alt: decodeHtmlEntities(readHtmlAttr(tag, "alt")),
-      src: decodeHtmlEntities(readHtmlAttr(tag, "src")),
-      srcset: decodeHtmlEntities(readHtmlAttr(tag, "srcset"))
-    });
-  }
-
-  return images;
-}
-
-function readHtmlAttr(tag, name) {
-  const pattern = new RegExp(`${name}\\s*=\\s*(["'])(.*?)\\1`, "i");
-  return tag.match(pattern)?.[2] || "";
-}
-
-function decodeHtmlEntities(value) {
-  return String(value || "").replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (entity, body) => {
-    if (body[0] === "#") {
-      const codePoint = body[1]?.toLowerCase() === "x" ? Number.parseInt(body.slice(2), 16) : Number.parseInt(body.slice(1), 10);
-      return Number.isFinite(codePoint) ? String.fromCodePoint(codePoint) : entity;
+      const rows = parseTsv(await response.text());
+      if (rows.length) return rows;
+      throw new Error("empty TSV");
+    } catch (error) {
+      errors.push(`${url}: ${error.message}`);
     }
+  }
 
-    return {
-      amp: "&",
-      apos: "'",
-      gt: ">",
-      lt: "<",
-      nbsp: " ",
-      quot: "\""
-    }[body.toLowerCase()] || entity;
+  throw new Error(errors.join(" | "));
+}
+
+function filterRows(rows, source) {
+  const countryRows = source.country ? rows.filter((row) => row.country_name === source.country) : rows;
+  const exactRows = countryRows.filter((row) => row.category === source.category);
+  if (exactRows.length) return exactRows;
+
+  if (source.category === "TV") {
+    return countryRows.filter((row) => /^TV\b/i.test(row.category || ""));
+  }
+
+  return exactRows;
+}
+
+function parseTsv(text) {
+  const lines = String(text || "")
+    .replace(/^\uFEFF/, "")
+    .split(/\r?\n/)
+    .filter((line) => line.trim());
+  const headers = lines.shift()?.split("\t").map(normalizeTsvHeader) || [];
+
+  return lines.map((line) => {
+    const values = line.split("\t");
+    return Object.fromEntries(headers.map((header, index) => [header, (values[index] || "").trim()]));
   });
 }
 
-function extractWeek(lines, place) {
-  const pattern = new RegExp(`^${escapeRegExp(place)}\\s*\\|\\s*\\d{1,2}\\/\\d{1,2}\\/\\d{2}\\s*-\\s*\\d{1,2}\\/\\d{1,2}\\/\\d{2}$`);
-  const line = lines.find((entry) => pattern.test(entry));
-  if (line) {
-    return line.split("|")[1].trim();
+function normalizeTsvHeader(header) {
+  return String(header || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+}
+
+function latestWeekValue(rows) {
+  const weeks = [...new Set(rows.map((row) => row.week).filter(Boolean))].sort(compareWeekValues);
+  if (!weeks.length) throw new Error("No matching rows in Netflix TSV data.");
+  return weeks.at(-1);
+}
+
+function compareWeekValues(left, right) {
+  return parseWeekDate(left).getTime() - parseWeekDate(right).getTime();
+}
+
+function weekRangeFromEndDate(value) {
+  const end = parseWeekDate(value);
+  const start = new Date(end);
+  start.setUTCDate(end.getUTCDate() - 6);
+  return `${formatDatePart(start)} - ${formatDatePart(end)}`;
+}
+
+function formatDatePart(date) {
+  return `${date.getUTCFullYear()}/${date.getUTCMonth() + 1}/${date.getUTCDate()}`;
+}
+
+function parseWeekDate(value) {
+  const text = String(value || "").trim();
+  const isoMatch = text.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (isoMatch) {
+    return new Date(Date.UTC(Number(isoMatch[1]), Number(isoMatch[2]) - 1, Number(isoMatch[3])));
   }
 
-  const joined = lines.join("\n");
-  const joinedMatch = joined.match(
-    new RegExp(`${escapeRegExp(place)}\\s*\\|\\s*(\\d{1,2}\\/\\d{1,2}\\/\\d{2}\\s*-\\s*\\d{1,2}\\/\\d{1,2}\\/\\d{2})`)
-  );
-  if (joinedMatch) return joinedMatch[1].trim();
-
-  const standalone = lines.find((entry) => /^\d{1,2}\/\d{1,2}\/\d{2}\s*-\s*\d{1,2}\/\d{1,2}\/\d{2}$/.test(entry));
-  if (standalone) return standalone;
-
-  throw new Error(`Unable to find ${place} week range.`);
-}
-
-function extractOverviewSegment(lines, source) {
-  const start = lines.findIndex((line) => source.overviewPattern.test(line));
-  if (start === -1) {
-    throw new Error(`Unable to find overview table for ${source.label}.`);
+  const usMatch = text.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2}|\d{4})$/);
+  if (usMatch) {
+    const year = usMatch[3].length === 2 ? Number(`20${usMatch[3]}`) : Number(usMatch[3]);
+    return new Date(Date.UTC(year, Number(usMatch[1]) - 1, Number(usMatch[2])));
   }
 
-  const end = lines.findIndex(
-    (line, index) => index > start && /^(Catch the Latest|Must-Watch Videos|Explore The Most Watched)/i.test(line)
-  );
-  return lines.slice(start + 1, end === -1 ? undefined : end);
+  throw new Error(`Invalid TSV week value: ${value}`);
 }
 
-function parseRows(segment, key) {
-  const rows = parseCompactRows(segment, key);
-  if (rows.length === 10) return rows;
-
-  const cellRows = parseCellRows(segment, key);
-  if (cellRows.length === 10) return cellRows;
-
-  throw new Error(`Unable to parse ${key} rows. Preview: ${segment.slice(0, 20).join(" | ")}`);
-}
-
-function parseCompactRows(segment, key) {
-  const rows = [];
-
-  for (const rawLine of segment) {
-    const line = cleanRowText(rawLine);
-    if (!line || isHeaderCell(line)) continue;
-
-    const globalMatch = line.match(/^0?([1-9]|10)\s+(.+?)\s+(\d+)\s+([\d,]+)\s+(\d+:\d{2})\s+([\d,]+)$/);
-    if (key === "global" && globalMatch) {
-      rows.push({
-        rank: Number(globalMatch[1]),
-        title: globalMatch[2].trim(),
-        weeks: Number(globalMatch[3]),
-        views: toNumber(globalMatch[4]),
-        runtime: globalMatch[5],
-        hours: toNumber(globalMatch[6])
-      });
-      continue;
-    }
-
-    const countryMatch = line.match(/^0?([1-9]|10)\s+(.+?)\s+(\d+)$/);
-    if (key !== "global" && countryMatch) {
-      rows.push({
-        rank: Number(countryMatch[1]),
-        title: countryMatch[2].trim(),
-        weeks: Number(countryMatch[3])
-      });
-    }
-  }
-
-  return normalizeRows(rows);
-}
-
-function parseCellRows(segment, key) {
-  const cells = segment.map(cleanRowText).filter((cell) => cell && !isHeaderCell(cell) && cell !== "Image");
-  const rows = [];
-
-  for (let index = 0; index < cells.length && rows.length < 10; index += 1) {
-    const rank = parseRank(cells[index]);
-    if (!rank) continue;
-
-    let cursor = index + 1;
-    while (cells[cursor] === "Image") cursor += 1;
-    const title = cells[cursor];
-    const weeks = Number(cells[cursor + 1]);
-
-    if (!title || !Number.isFinite(weeks)) continue;
-
-    if (key === "global") {
-      const views = toNumber(cells[cursor + 2]);
-      const runtime = cells[cursor + 3];
-      const hours = toNumber(cells[cursor + 4]);
-      if (!Number.isFinite(views) || !/^\d+:\d{2}$/.test(runtime) || !Number.isFinite(hours)) continue;
-      rows.push({ rank, title, weeks, views, runtime, hours });
-      index = cursor + 4;
-    } else {
-      rows.push({ rank, title, weeks });
-      index = cursor + 1;
-    }
-  }
-
-  return normalizeRows(rows);
-}
-
-function normalizeRows(rows) {
-  return rows
-    .filter((row) => row.rank >= 1 && row.rank <= 10)
-    .sort((left, right) => left.rank - right.rank)
-    .slice(0, 10);
-}
-
-function transformRow(row, key, logoMap) {
-  const titleInfo = localizeTitle(row.title);
-  const previous = previousItems.get(normalizeTitle(row.title));
-  const logo = pickLogo(row.title, logoMap) || previous?.logo || "";
-  const accent = previous?.accent || accentForTitle(row.title);
+function transformRow(row, key) {
+  const originalTitle = tsvTitle(row);
+  const titleInfo = localizeTitle(originalTitle);
+  const previous = previousItems.get(normalizeTitle(originalTitle));
+  const weeks = metricNumber(row.cumulative_weeks_in_top_10 || row.weeks_in_top_10);
+  const views = metricNumber(row.weekly_views);
+  const hours = metricNumber(row.weekly_hours_viewed);
 
   return {
-    rank: row.rank,
+    rank: metricNumber(row.weekly_rank),
     title: titleInfo.title,
-    originalTitle: row.title,
+    originalTitle,
     type: titleInfo.type,
-    weeks: `上榜 ${row.weeks} 周`,
-    metricOne: key === "global" ? formatCount(row.views) : `${row.weeks} 周`,
-    metricTwo: key === "global" ? `${formatCount(row.hours)}小时` : titleInfo.type,
-    logo,
-    accent
+    weeks: `上榜 ${weeks} 周`,
+    metricOne: key === "global" ? formatCount(views) : `${weeks} 周`,
+    metricTwo: key === "global" ? `${formatCount(hours)}小时` : titleInfo.type,
+    logo: previous?.logo || "",
+    accent: previous?.accent || accentForTitle(originalTitle)
   };
 }
 
-function buildLogoMap(images) {
-  const result = new Map();
-
-  for (const image of images) {
-    const title = cleanImageTitle(image.alt);
-    const src = image.src || firstSrcsetUrl(image.srcset);
-    if (!title || !src || title === "Image") continue;
-
-    for (const key of titleKeys(title)) {
-      const current = result.get(key);
-      if (!current || logoScore(src) > logoScore(current)) {
-        result.set(key, src);
-      }
-    }
-  }
-
-  return result;
+function tsvTitle(row) {
+  return row.season_title && row.season_title !== "N/A" ? row.season_title : row.show_title || row.title || "";
 }
 
-function pickLogo(title, logoMap) {
-  for (const key of titleKeys(title)) {
-    const logo = logoMap.get(key);
-    if (logo) return logo;
-  }
-
-  return "";
-}
-
-function titleKeys(title) {
-  const base = stripSeriesSuffix(title);
-  return [...new Set([normalizeTitle(title), normalizeTitle(base)])].filter(Boolean);
-}
-
-function cleanImageTitle(value) {
-  return cleanRowText(value).replace(/^Image:\s*/i, "").trim();
-}
-
-function firstSrcsetUrl(value) {
-  return String(value || "")
-    .split(",")
-    .map((entry) => entry.trim().split(/\s+/)[0])
-    .find(Boolean) || "";
-}
-
-function logoScore(src) {
-  if (/\/n6T0vlTccejvjnTlICHzHgzbFd0\//.test(src)) return 4;
-  if (/\.png(?:\?|$)/i.test(src)) return 3;
-  if (/\.webp(?:\?|$)/i.test(src)) return 2;
-  if (/\.jpe?g(?:\?|$)/i.test(src)) return 1;
-  return 0;
+function metricNumber(value) {
+  const number = Number(String(value ?? "").replace(/,/g, "").trim());
+  return Number.isFinite(number) ? number : 0;
 }
 
 function localizeTitle(originalTitle) {
@@ -500,17 +334,6 @@ function monthNumber(monthName) {
   );
 }
 
-function normalizeWeek(value) {
-  return value
-    .split(/\s*-\s*/)
-    .map((part) => {
-      const match = part.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2})$/);
-      if (!match) return part;
-      return `20${match[3]}/${Number(match[1])}/${Number(match[2])}`;
-    })
-    .join(" - ");
-}
-
 function formatCount(value) {
   if (value >= 100_000_000) return `${trimNumber(value / 100_000_000, 3)} 亿`;
   if (value >= 10_000) return `${trimNumber(value / 10_000, 1)} 万`;
@@ -521,37 +344,8 @@ function trimNumber(value, digits) {
   return Number(value.toFixed(digits)).toString();
 }
 
-function toNumber(value) {
-  return Number(String(value).replace(/,/g, ""));
-}
-
-function parseRank(value) {
-  const match = String(value).match(/^0?([1-9]|10)$/);
-  return match ? Number(match[1]) : null;
-}
-
-function cleanRowText(value) {
-  return String(value || "")
-    .replace(/\[Button:\s*([^\]]+)\]/g, "$1")
-    .replace(/Image/g, " ")
-    .replace(/\|/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-function isHeaderCell(value) {
-  return /^(Ranking|Views|Runtime|Hours Viewed|Weeks in Top 10)$/i.test(value);
-}
-
-function normalizeVisibleLines(text) {
-  return text
-    .split(/\n+/)
-    .map((line) => line.replace(/\s+/g, " ").trim())
-    .filter(Boolean);
-}
-
 function stripSeriesSuffix(title) {
-  return title.replace(/:\s*(Season \d+|Limited Series)$/i, "").trim();
+  return String(title || "").replace(/:\s*(Season \d+|Limited Series)$/i, "").trim();
 }
 
 function normalizeTitle(title) {
@@ -607,10 +401,6 @@ async function readExistingData(path) {
   } catch {
     return null;
   }
-}
-
-function escapeRegExp(value) {
-  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function parseArgs(argv) {
