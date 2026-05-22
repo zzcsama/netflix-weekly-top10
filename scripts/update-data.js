@@ -68,10 +68,15 @@ async function scrapeChart(page, key, source) {
   await page.goto(source.source, { waitUntil: "domcontentloaded", timeout: 90_000 });
   await page.waitForLoadState("networkidle", { timeout: 45_000 }).catch(() => {});
   await page.waitForFunction(
-    () => document.body?.innerText?.includes("Top 10 Shows") && document.body.innerText.includes("#10 in Shows"),
-    null,
-    { timeout: 60_000 }
-  );
+    ({ place }) => {
+      const text = document.body?.innerText || "";
+      return text.includes(`${place} |`) && /Top 10 Shows.*overview/i.test(text);
+    },
+    { place: source.place },
+    { timeout: 20_000 }
+  ).catch(() => {
+    console.warn(`Chart overview was slow to appear for ${source.label}; parsing the current page snapshot.`);
+  });
   await warmLazyImages(page);
 
   const snapshot = await page.evaluate(() => ({
