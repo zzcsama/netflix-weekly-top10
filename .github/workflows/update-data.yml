@@ -5,11 +5,11 @@ on:
     branches: [main]
     paths:
       - data/rankings.json
-      - .github/workflows/update-data.yml
-      - README.md
   schedule:
-    # Every Wednesday at 19:00 in Asia/Shanghai, after Netflix's weekly chart is usually live.
-    - cron: "0 11 * * 3"
+    # Wednesday 21:17 in Asia/Shanghai. Avoid minute 0 because GitHub can drop busy scheduled runs.
+    - cron: "17 13 * * 3"
+    # Thursday 09:17 in Asia/Shanghai as a retry if Netflix publishes late.
+    - cron: "17 1 * * 4"
   workflow_dispatch:
 
 permissions:
@@ -17,9 +17,14 @@ permissions:
   pages: write
   id-token: write
 
+concurrency:
+  group: netflix-weekly-top10
+  cancel-in-progress: false
+
 jobs:
   update-data:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
@@ -40,26 +45,43 @@ jobs:
       - name: Fetch latest Netflix ranking data
         run: npm run update:data
       - name: Commit updated ranking data
+        id: commit-data
         run: |
           if git diff --quiet -- data/rankings.json; then
             echo "No ranking data changes."
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            if [ "${{ github.event_name }}" = "schedule" ]; then
+              echo "should_publish=false" >> "$GITHUB_OUTPUT"
+            else
+              echo "should_publish=true" >> "$GITHUB_OUTPUT"
+            fi
           else
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
             git add data/rankings.json
             git commit -m "Update Netflix weekly ranking data"
             git push
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "should_publish=true" >> "$GITHUB_OUTPUT"
           fi
+      - name: Capture ranking images
+        if: steps.commit-data.outputs.should_publish == 'true'
+        run: npm run capture:all
+      - name: Publish to Telegram
+        if: steps.commit-data.outputs.should_publish == 'true'
+        run: npm run publish:telegram
+      - name: Prepare Pages artifact
+        if: steps.commit-data.outputs.should_publish == 'true'
+        run: rm -rf node_modules .ms-playwright outputs
       - name: Configure GitHub Pages
+        if: steps.commit-data.outputs.should_publish == 'true'
         uses: actions/configure-pages@v5
       - name: Upload site artifact
+        if: steps.commit-data.outputs.should_publish == 'true'
         uses: actions/upload-pages-artifact@v4
         with:
           path: .
       - name: Deploy to GitHub Pages
+        if: steps.commit-data.outputs.should_publish == 'true'
         id: deployment
         uses: actions/deploy-pages@v4
-      - name: Capture ranking images
-        run: npm run capture:all
-      - name: Publish to Telegram
-        run: npm run publish:telegram
