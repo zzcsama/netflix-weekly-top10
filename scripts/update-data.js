@@ -191,6 +191,7 @@ function extractHtmlImages(html) {
         readHtmlAttr(attrs, "aria-label") ||
           readHtmlAttr(attrs, "title") ||
           readHtmlAttr(attrs, "alt") ||
+          nestedImageAlt(content) ||
           stripTags(content)
       ),
       src: href,
@@ -357,6 +358,11 @@ function stripTags(value) {
     .replace(/<[^>]*>/g, " ")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+function nestedImageAlt(value) {
+  const tag = String(value || "").match(/<img\b[^>]*>/i)?.[0] || "";
+  return tag ? readHtmlAttr(tag, "alt") : "";
 }
 
 function logoScore(src) {
