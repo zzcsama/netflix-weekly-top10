@@ -20,6 +20,7 @@ if (images.length === 0) {
 }
 
 const charts = loadCharts();
+assertFreshCharts(charts);
 const caption = buildCaption(charts);
 const form = new FormData();
 
@@ -66,6 +67,16 @@ function loadCharts() {
   return data.charts;
 }
 
+function assertFreshCharts(charts) {
+  if (process.env.ALLOW_STALE_NETFLIX_PUBLISH === "true") return;
+
+  const endDate = parseWeekEnd(charts.global.week);
+  const ageDays = Math.floor((Date.now() - endDate.getTime()) / 86_400_000);
+  if (ageDays > 21) {
+    throw new Error(`Refusing to publish stale Netflix data (${charts.global.week}). Run update:data first.`);
+  }
+}
+
 function buildCaption(charts) {
   const pageUrl = process.env.PUBLIC_PAGE_URL || "https://zzcsama.github.io/netflix-weekly-top10/";
   const lines = [
@@ -87,6 +98,12 @@ function buildCaption(charts) {
 
 function formatItem(item) {
   return `${item.rank}. ${item.title} · ${item.metricOne}`;
+}
+
+function parseWeekEnd(week) {
+  const match = String(week || "").match(/-\s*(\d{4})\/(\d{1,2})\/(\d{1,2})$/);
+  if (!match) throw new Error(`Invalid Netflix week range: ${week}`);
+  return new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]), 23, 59, 59));
 }
 
 function parseArgs(argv) {
