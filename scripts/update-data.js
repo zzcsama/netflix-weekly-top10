@@ -58,18 +58,31 @@ if (hasSamePublishedCharts(previousData, nextData)) {
 }
 
 async function loadChart(key, source) {
+  const errors = [];
+
   try {
     const chart = await fetchChart(key, source);
     console.log(`Loaded ${source.label} from official Netflix TSV for ${chart.week}.`);
     return chart;
   } catch (error) {
-    const previousChart = previousData?.charts?.[key];
-    if (previousChart?.items?.length === 10) {
-      console.warn(`Using previous ${source.label} data because official Netflix TSV failed: ${error.message}`);
-      return previousChart;
-    }
-    throw error;
+    errors.push(`TSV: ${error.message}`);
   }
+
+  try {
+    const chart = await fetchChartFromPage(key, source);
+    console.log(`Loaded ${source.label} from official Netflix page for ${chart.week}.`);
+    return chart;
+  } catch (error) {
+    errors.push(`page: ${error.message}`);
+  }
+
+  const previousChart = previousData?.charts?.[key];
+  if (previousChart?.items?.length === 10) {
+    console.warn(`Using previous ${source.label} data because official Netflix fetch failed: ${errors.join(" | ")}`);
+    return previousChart;
+  }
+
+  throw new Error(errors.join(" | "));
 }
 
 async function fetchChart(key, source) {
@@ -90,6 +103,24 @@ async function fetchChart(key, source) {
     console.warn(`Unable to fetch Netflix title images for ${source.label}: ${error.message}`);
     return new Map();
   });
+
+  return buildChartFromRows(key, source, latestRows, week, logoMap);
+}
+
+async function fetchChartFromPage(key, source) {
+  const html = await fetchHtml(source.source);
+  const text = htmlToText(html);
+  const week = extractPageWeek(text, key);
+  const latestRows = key === "global" ? parseGlobalPageRows(text) : parseCountryPageRows(text);
+
+  if (latestRows.length !== 10) {
+    throw new Error(`Expected 10 ${source.label} page rows, found ${latestRows.length}.`);
+  }
+
+  return buildChartFromRows(key, source, latestRows, week, buildLogoMap(extractHtmlImages(html)));
+}
+
+function buildChartFromRows(key, source, latestRows, week, logoMap) {
   const items = latestRows.map((row) => transformRow(row, key, logoMap));
 
   if (key === "global") {
@@ -153,7 +184,11 @@ async function fetchTsvRows(urls) {
 }
 
 async function fetchLogoMap(sourceUrl) {
-  const response = await fetch(sourceUrl, {
+  return buildLogoMap(extractHtmlImages(await fetchHtml(sourceUrl)));
+}
+
+async function fetchHtml(url) {
+  const response = await fetch(url, {
     headers: {
       "user-agent": userAgent,
       "accept-language": "en-US,en;q=0.9",
@@ -165,7 +200,7 @@ async function fetchLogoMap(sourceUrl) {
     throw new Error(`HTTP ${response.status}`);
   }
 
-  return buildLogoMap(extractHtmlImages(await response.text()));
+  return response.text();
 }
 
 function extractHtmlImages(html) {
@@ -252,6 +287,137 @@ function normalizeTsvHeader(header) {
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "_")
     .replace(/^_+|_+$/g, "");
+}
+
+function extractPageWeek(text, key) {
+  const label = key === "global" ? "Global" : "United States";
+  const pattern = new RegExp(`${label}\\s*\\|\\s*(\\d{1,2}/\\d{1,2}/\\d{2,4})\\s*-\\s*(\\d{1,2}/\\d{1,2}/\\d{2,4})`, "i");
+  const match = text.match(pattern);
+  if (!match) throw new Error(`Unable to find ${label} week range in Netflix page.`);
+  return `${formatDatePart(parseWeekDate(match[1]))} - ${formatDatePart(parseWeekDate(match[2]))}`;
+}
+
+function parseGlobalPageRows(text) {
+  return parsePageRows(text, "global").map((row) => ({
+    weekly_rank: row.rank,
+    season_title: row.title,
+    cumulative_weeks_in_top_10: row.weeks,
+    weekly_views: row.views,
+    weekly_hours_viewed: row.hours
+  }));
+}
+
+function parseCountryPageRows(text) {
+  return parsePageRows(text, "country").map((row) => ({
+    weekly_rank: row.rank,
+    season_title: row.title,
+    cumulative_weeks_in_top_10: row.weeks
+  }));
+}
+
+function parsePageRows(text, kind) {
+  const block = overviewBlock(text);
+  const lines = block
+    .split("\n")
+    .map((line) => line.replace(/\s+/g, " ").trim())
+    .filter(Boolean);
+  const rows = [];
+
+  for (const line of lines) {
+    const row = kind === "global" ? parseGlobalPageLine(line) : parseCountryPageLine(line);
+    if (row) rows.push(row);
+    if (rows.length === 10) break;
+  }
+
+  if (rows.length === 10) return rows;
+
+  return kind === "global" ? parseGlobalPageRowsCompact(block) : parseCountryPageRowsCompact(block);
+}
+
+function overviewBlock(text) {
+  const start = text.search(/Top 10 Shows(?: in United States)? overview/i);
+  if (start < 0) throw new Error("Unable to find overview table in Netflix page.");
+
+  const slice = text.slice(start);
+  const end = slice.search(/Catch the Latest|Explore The Most Watched/i);
+  return end > 0 ? slice.slice(0, end) : slice;
+}
+
+function parseGlobalPageLine(line) {
+  const match = line.match(/^0?(\d{1,2})\s+(?:Image\s+)?(.+?)\s+(\d+)\s+([\d,]+)\s+\d+:\d{2}\s+([\d,]+)$/i);
+  if (!match) return null;
+  return {
+    rank: Number(match[1]),
+    title: cleanPageTitle(match[2]),
+    weeks: match[3],
+    views: match[4],
+    hours: match[5]
+  };
+}
+
+function parseCountryPageLine(line) {
+  const match = line.match(/^0?(\d{1,2})\s+(?:Image\s+)?(.+?)\s+(\d+)$/i);
+  if (!match) return null;
+  return {
+    rank: Number(match[1]),
+    title: cleanPageTitle(match[2]),
+    weeks: match[3]
+  };
+}
+
+function parseGlobalPageRowsCompact(block) {
+  const rows = [];
+  const compact = block.replace(/\s+/g, " ");
+  const pattern = /(?:^|\s)0?(\d{1,2})\s+(?:Image\s+)?(.+?)\s+(\d+)\s+([\d,]+)\s+\d+:\d{2}\s+([\d,]+)(?=\s+0?\d{1,2}\s+(?:Image\s+)?|$)/gi;
+  for (const match of compact.matchAll(pattern)) {
+    rows.push({
+      rank: Number(match[1]),
+      title: cleanPageTitle(match[2]),
+      weeks: match[3],
+      views: match[4],
+      hours: match[5]
+    });
+    if (rows.length === 10) break;
+  }
+  return rows;
+}
+
+function parseCountryPageRowsCompact(block) {
+  const rows = [];
+  const compact = block.replace(/\s+/g, " ");
+  const pattern = /(?:^|\s)0?(\d{1,2})\s+(?:Image\s+)?(.+?)\s+(\d+)(?=\s+0?\d{1,2}\s+(?:Image\s+)?|$)/gi;
+  for (const match of compact.matchAll(pattern)) {
+    rows.push({
+      rank: Number(match[1]),
+      title: cleanPageTitle(match[2]),
+      weeks: match[3]
+    });
+    if (rows.length === 10) break;
+  }
+  return rows;
+}
+
+function cleanPageTitle(value) {
+  return String(value || "")
+    .replace(/\bButton:\s*/gi, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function htmlToText(html) {
+  return decodeHtmlEntities(
+    String(html || "")
+      .replace(/<script\b[\s\S]*?<\/script>/gi, " ")
+      .replace(/<style\b[\s\S]*?<\/style>/gi, " ")
+      .replace(/<br\s*\/?>/gi, "\n")
+      .replace(/<\/(p|div|li|tr|td|th|h[1-6]|section|article)>/gi, "\n")
+      .replace(/<[^>]+>/g, " ")
+      .replace(/\u00a0/g, " ")
+      .replace(/[ \t]+/g, " ")
+      .replace(/\n\s+/g, "\n")
+      .replace(/\n{2,}/g, "\n")
+      .trim()
+  );
 }
 
 function latestWeekValue(rows) {
@@ -446,6 +612,10 @@ function translateBaseTitle(title) {
       "Homicide Squad: New Orleans": "凶案小组：新奥尔良",
       "Worst Ex Ever": "最糟前任",
       Legends: "传奇卧底",
+      "The Boroughs": "伯勒镇",
+      Kylie: "凯莉",
+      "Wanda Sykes: Legacy": "旺达·塞克斯：传承",
+      "Ms. Rachel": "瑞秋老师",
       "Lord of the Flies": "蝇王",
       "Funny AF with Kevin Hart": "凯文·哈特爆笑现场",
       "The Roast of Kevin Hart": "凯文·哈特吐槽大会"
